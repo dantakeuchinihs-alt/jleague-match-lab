@@ -19,8 +19,8 @@ from PIL import Image
 
 from jleague_data import DATA_PAGE, DATA_URL, current_clubs, download_japan_csv, parse_japan_bytes
 from jleague_model import (
-    MODEL_A, MODEL_B, MODEL_C, MODEL_D, MODELS, backtest, club_ratings,
-    historical_window, predict_models, prediction_rows, probs_for_grid, score_for_grid,
+    MODEL_A, MODEL_B, MODEL_C, MODEL_D, MODELS, MODEL_VERSION, backtest, club_ratings,
+    recent_season_codes, historical_window, predict_models, prediction_rows, probs_for_grid, score_for_grid,
 )
 from jleague_fixtures import JST, download_fixtures_scores, group_weeks
 from prediction_tracker import (
@@ -120,9 +120,12 @@ def new_record(fixture: dict, matches: pd.DataFrame) -> dict:
     score, exact = score_for_grid(grid)
     probs = probs_for_grid(grid)
     data_date = past.Date.max().date().isoformat()
-    return make_prediction_record(fixture["home"], fixture["away"], kickoff,
-                                  fixture["source"], data_date,
-                                  grid, pred["goals"][MODEL_A], score, exact, probs)
+    record = make_prediction_record(fixture["home"], fixture["away"], kickoff,
+                                    fixture["source"], data_date,
+                                    grid, pred["goals"][MODEL_A], score, exact, probs)
+    record["model_version"] = MODEL_VERSION  # preserve model changes in saved history
+    record["training_seasons"] = recent_season_codes(past)
+    return record
 
 
 def records_or_empty():
@@ -160,6 +163,8 @@ if matches.empty:
     st.error("The uploaded file has no completed J1 league matches.")
     st.stop()
 clubs, season = current_clubs(matches)
+model_seasons = recent_season_codes(matches)
+model_seasons_label = " + ".join(model_seasons)
 if len(clubs) < 6:
     st.error("Too few J1 clubs were detected in the latest season. Check the CSV.")
     st.stop()
@@ -169,6 +174,7 @@ st.sidebar.caption("Data source: Football-Data.co.uk / Japan")
 st.sidebar.metric("Completed results loaded", f"{len(matches):,}")
 st.sidebar.metric("Latest published match", latest)
 st.sidebar.caption(f"Most recent competition: {season}")
+st.sidebar.caption(f"Model seasons: {model_seasons_label}")
 st.sidebar.caption("Historical scores may be published with a delay. The 2026 transitional tournament is excluded from modelling.")
 st.sidebar.markdown(f"[Source and update notes]({DATA_PAGE})")
 
@@ -211,7 +217,7 @@ with t_predict:
             r = pred["ratings"]
             normalize_display(pd.DataFrame({"Rating":list(r.keys()),"Relative to J1 average":[round(x,2) for x in r.values()]}))
             st.caption("Attack above 1.00 indicates more goals than the venue league average. Defensive vulnerability below 1.00 indicates fewer goals conceded.")
-            st.caption(f"Home club sample: {pred['counts'][0]} recent home matches; away club sample: {pred['counts'][1]} recent away matches. Values are smoothed toward league means.")
+            st.caption(f"Home club sample: {pred['counts'][0]} home matches; away club sample: {pred['counts'][1]} away matches across {model_seasons_label}. Values are smoothed toward league means.")
         with right:
             st.subheader("Exact-score probability map")
             st.plotly_chart(heatmap(pred["grids"][MODEL_A], home, away), use_container_width=True)
@@ -331,10 +337,21 @@ with t_tracker:
             st.info("No saved J1 predictions yet. Use the Fixtures tab to save one before kickoff.")
 
 with t_ratings:
-    st.subheader("Team strength profiles")
-    st.caption("Venue-specific attacking strength and defensive vulnerability (1.00 = J1 league average). A LOWER defensive vulnerability is better.")
-    cutoff = pd.Timestamp(now_jst.date()) + pd.Timedelta(days=1)
-    rated = club_ratings(historical_window(matches, cutoff), clubs)
+    st.subheader(f"Team strength profiles / {model_seasons_label}")
+    profile_matches = historical_window(matches, pd.Timestamp(now_jst.date()) + pd.Timedelta(days=1))
+    st.caption(
+        f"Based on the latest two seasons with completed J1 results: {model_seasons_label}. "
+        f"{len(profile_matches)} completed matches through "
+        f"{profile_matches.Date.max().strftime('%d %b %Y')}. "
+        "Both club records and league averages use these seasons; earlier seasons are excluded."
+    )
+    st.caption(
+        "1.00 = two-season league average for the corresponding home/away venue. "
+        "Higher attack is better; LOWER defensive vulnerability is better. "
+        "Ratings are smoothed toward 1.00 (equivalent to seven prior games) to avoid "
+        "overreacting to small samples. The 2026 special competition is excluded."
+    )
+    rated = club_ratings(profile_matches, clubs)
     sort_col = st.selectbox("Rank by", ["Home attack", "Away attack", "Home defence vulnerability", "Away defence vulnerability"])
     ascending = "vulnerability" in sort_col
     rated = rated.sort_values(sort_col, ascending=ascending).reset_index(drop=True)
@@ -345,11 +362,16 @@ with t_ratings:
     c1,c2,c3,c4 = st.columns(4)
     for col, label in zip([c1,c2,c3,c4], ["Home attack", "Away attack", "Home defence vulnerability", "Away defence vulnerability"]):
         col.metric(label, f"{profile[label]:.2f}")
+    st.caption(f"Two-season sample for {selected}: {int(profile['Home matches'])} home matches, "
+               f"{int(profile['Away matches'])} away matches. A venue with no matches remains at 1.00.")
+    st.info("Team profiles and current predictions now use the same two-season window. "
+            "The recent-form model deliberately emphasises the last six venue matches "
+            "within those seasons, while the baseline uses all available matches.")
 
 with t_evidence:
     st.subheader("Model methodology and evidence")
     st.markdown("**Four competing models.** Attack × Defence is the initial reference, not a proven J1 winner. The simple average uses a team’s scoring rate and the opponent’s conceded rate; Recent Attack × Defence uses a shorter venue window; the blend is a 50/50 probability mixture.")
-    st.markdown("**Data discipline.** Historical evaluations use only matches strictly before each match date, with venue smoothing for small samples. The transitional 2026 special competition is excluded. These historical seasons have been inspected during development, so prospective tracking is still required.")
+    st.markdown("**Data discipline.** Current forecasts and ratings use only the latest two seasons with results. Historical backtests apply that same rule using only results strictly before each test date. The transitional 2026 special competition is excluded. These historical seasons have been inspected during development, so prospective tracking is still required.")
     if st.button("Calculate historical backtest", type="primary"):
         with st.spinner("Evaluating walk-forward predictions…"):
             summary, detailed = get_evidence(matches)

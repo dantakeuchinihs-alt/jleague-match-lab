@@ -13,9 +13,9 @@ A standalone J1 League match prediction and analytics website, adapted from the 
 
 ## Prediction models
 
-1. **Attack × Defence** *(default)*: estimated home goals = league home goals/game × home attacking ratio × away defensive vulnerability ratio; away equivalent uses away goals baseline. Venue rates are smoothed using a seven-game league-average prior and up to 20 venue matches.
+1. **Attack × Defence** *(default)*: estimated home goals = league home goals/game × home attacking ratio × away defensive vulnerability ratio; away equivalent uses away goals baseline. Current predictions use **every available venue match from the latest two ordinary J1 seasons**, smoothed using a seven-game league-average prior.
 2. **Simple average**: mean of the smoothed attack and opponent's conceding rates, separately home and away.
-3. **Recent Attack × Defence**: same calculation with up to six venue matches and a five-match prior.
+3. **Recent Attack × Defence**: the same model using up to six venue matches **within the latest two seasons**, with a five-match prior.
 4. **50/50 blend**: an equal mixture of the full Poisson score distributions from models 1 and 3.
 
 All models use the same 90-minute full-time goals. Win/draw/loss probabilities are calculated from each Poisson score matrix. JPN.csv does **not** document the shots-on-target columns used by EPL Match Lab, so its shots model is deliberately not copied.
@@ -71,3 +71,21 @@ The project code has been syntax checked and its importer, model math, fixtures 
 Source: [Football-Data.co.uk Japan](https://www.football-data.co.uk/japan.php) (`https://www.football-data.co.uk/new/JPN.csv`). The website specifies that free data are intended for private individual use, not commercial data products. This project fetches historical data without bundling them. Check source permissions before commercial use or redistribution.
 
 Scores may be delayed; this is an analysis tool, not a live betting or betting-advice service.
+
+
+## Two-season model + Team Strength Profiles (latest update)
+
+**Both predictions and Team ratings now use the two most recent ordinary J1 seasons with completed results.** The training window is based on season labels, **not a fixed 730-day period**. For the current 2026/27 J1 league, that means **2025 and 2026/27**, while the transitional **2026 special tournament is always excluded**. As soon as 2027/28 match results become available, the window moves forward to **2026/27 and 2027/28**.
+
+- Attack × Defence and Simple Average use all home/away matches from those two seasons and a seven-game neutral league-average prior.
+- Recent Attack × Defence uses up to the most recent six home/away matches in the same two-season dataset. The 50/50 blend is built from those updated models.
+- Team ratings use the **same two seasons and prior** as the main model. The table includes each club's home and away sample sizes.
+- Older results remain available for **historical backtesting**. For each backtested match, the model chooses the two latest seasons whose match results existed *before that match day*, so no future match data leaks into training.
+- Prediction history stays intact. **New saved forecasts** include a `model_version` and the exact `training_seasons` in the locked GitHub record; old records retain their original values rather than being recalculated.
+- A newly promoted team with little J1 history is smoothed toward the league average; this is a limitation, not evidence that it is an average-strength team.
+
+**Model choice has not been independently validated for J1.** Two seasons should better represent present-day squads than distant historical seasons, but its actual predictive advantage must be evaluated prospectively.
+
+### Apply this update
+
+Download the separate two-season update ZIP and upload **`app.py`, `jleague_model.py`, `prediction_tracker.py`** to the root of your **J.League** GitHub repository, replacing the existing versions. The `README.md` is optional. **Do not upload these files to your Premier League repository.** All existing Streamlit Secrets remain unchanged. Streamlit will normally redeploy after you commit changes.

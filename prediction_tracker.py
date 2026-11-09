@@ -236,6 +236,7 @@ def table_for_predictions(records: list[dict], matches: pd.DataFrame, now: datet
                 "Fixture (JST)":kickoff.astimezone(JST_ZONE).strftime("%Y-%m-%d %H:%M"),
                 "Home":record["home"], "Away":record["away"],
                 "Predicted score":record["score"],
+                "Model version":record.get("model_version", "Legacy model / before two-season update"),
                 "Home win %":round(float(record["p_home"])*100, 1),
                 "Draw %":round(float(record["p_draw"])*100, 1),
                 "Away win %":round(float(record["p_away"])*100, 1),
